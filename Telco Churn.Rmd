@@ -1,0 +1,201 @@
+---
+title: "Telco Customer Churn"
+output: html_notebook
+---
+
+***Importing Packages***
+
+At first, we will import all the libraries that would be used in the project.
+```{r message=FALSE, warning=FALSE}
+library(moments)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(caret)
+library(ggplot2)
+```
+
+***Importing Dataset***
+
+Now, we will import the dataset into our working file.
+```{r}
+churnData <- read.csv('https://raw.githubusercontent.com/Hannah-Susan-Mathew/Datasets/main/Telco-Customer-Churn.csv', stringsAsFactors = TRUE)
+```
+
+***Understanding the Dataset***
+
+In order to understand the data we use `summarize()` and `str()` functions.
+```{r}
+churnData
+```
+```{r}
+str(churnData)
+```
+We see that our dataset has 21 columns and 7043 rows. Also, all the `string` columns are now taken as factors. We also note that the `SeniorCitizen` column's data type is given as `int`, which actually is not true. Rather, its data type is supposed to be factors. We will consider this during the pre-processing step.
+```{r}
+summary(churnData)
+```
+In the summary, it is clear that all but `TotalCharges` columns has no `NA` values. We will work with the null values of the column in the preprocessing step.
+***Data Preprocessing***
+
+It is mandatory that we preprocess the dataset before working on it.
+From the `summary()` function we see that `TotalCharges` has *11 NA* values. Thus we need to impute it. We see that the maximum value that `TotalCharges` in each row can take is the product of `tenure` and `MonthlyCharges`. Hence the missing values are replaced with `tenure * MonthlyCharges` for each row.
+```{r}
+sum(is.na(churnData))
+```
+```{r}
+sum(is.na(churnData$TotalCharges))
+```
+
+```{r}
+churnData$TotalCharges <- ifelse(is.na(churnData$TotalCharges), churnData$MonthlyCharges*churnData$tenure, churnData$TotalCharges)
+```
+
+```{r}
+sum(is.na(churnData))
+```
+Finally, our data is clean of missing values.
+
+In the summary, we see that the minimum value of tenure column is 0. But, analysing customers who have been for 0 months is not effective. Hene we remove the rows which have tenure as 0.
+```{r}
+churnData <- churnData[!(churnData$tenure == 0),]
+summary(churnData)
+```
+
+```{r}
+# Function to find Mode
+
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+getmode(churnData$tenure)
+getmode(churnData$MonthlyCharges)
+getmode(churnData$TotalCharges)
+```
+
+```{r}
+skewness(churnData$tenure)
+skewness(churnData$MonthlyCharges)
+skewness(churnData$TotalCharges)
+```
+
+```{r}
+kurtosis(churnData$tenure)
+kurtosis(churnData$MonthlyCharges)
+kurtosis(churnData$TotalCharges)
+```
+
+Now it is clear that customerID is not of much use. Hence, it is discarded.
+```{r}
+churnData <- churnData[,-1]
+```
+Now our dataset has 20 columns.
+```{r}
+churnData
+```
+
+As noticed in `str(churnData)`, the `SeniorCitizen` column is of type `int`. But actually, it has categorical values. Hence, it is converted to factor levels.
+```{r}
+churnData$SeniorCitizen <- factor(churnData$SeniorCitizen)
+```
+
+```{r}
+str(churnData$SeniorCitizen)
+```
+
+We have three numerical columns and their range differences from each other. Hence, we scale the numerical columns using `Standard Scaling`.
+```{r}
+churnData$MonthlyCharges <- scale(churnData$MonthlyCharges)
+churnData$TotalCharges <- scale(churnData$TotalCharges)
+churnData$tenure <- scale(churnData$tenure)
+```
+
+```{r}
+summary(churnData)
+```
+
+```{r}
+set.seed(2020)
+```
+
+***Train-Test Splitting the Dataset***
+Now we will split the new dataset into train set and test set. The train-test splitting ratio is taken as `65:35`.
+```{r}
+Index <- sample(nrow(churnData),0.65*nrow(churnData))
+Trainchurn <- churnData[Index,]
+Testchurn <- churnData[-Index,]
+```
+
+***Modelling***
+
+Now we will move to modelling. Since, the target column-`Churn`-has binary values, we will use Logistic Regresssion, Decision Tree and Random Forest.
+**1. Decision Tree**
+The splitting criterion used is *Gini Index*.
+```{r}
+Tree <- rpart(Churn~., Trainchurn, method = 'class', parms = list(split = 'gini'))
+Tree
+```
+```{r}
+summary(Tree)
+```
+Now we will evaluate the decision tree model. In order to evaluate the model, we will use a confusion matrix.
+```{r}
+pred_Tree <- predict(Tree, Testchurn, type='class')
+
+Tree_cm <- confusionMatrix(pred_Tree, Testchurn$Churn, mode = "everything")
+Tree_cm
+```
+
+```{r}
+rpart.plot(Tree)
+```
+
+**2. Random Forest**
+Now we will use the random forest model on our data. The number of trees is taken as 500.
+```{r}
+Forest <- randomForest(Churn~.,Trainchurn, ntree = 500, split = 'gini')
+summary(Forest)
+```
+
+Now we will evaluate the random forest model.
+```{r}
+pred_Forest <- predict(Forest, Testchurn, type='class')
+
+Forest_cm <- confusionMatrix(pred_Forest, Testchurn$Churn, mode = "everything")
+Forest_cm
+```
+**3. Logistic Regression**
+Now we use the logistic regression model. We assume that there is some dependency of each attribute on the target feature.
+```{r}
+LogReg <- glm(Churn~., data = Trainchurn, family='binomial')
+summary(LogReg)
+```
+Now we will evaluate the logistic regression model.
+```{r warning=FALSE}
+pred_LogReg <- predict(LogReg, Testchurn, type = 'response')
+```
+Here the threshold value is taken as 0.45.
+```{r}
+LogReg_target <- ifelse(pred_LogReg > 0.45, 'Yes', 'No')
+
+LogReg_cm <- confusionMatrix(as.factor(LogReg_target), Testchurn$Churn, mode = "everything")
+LogReg_cm
+```
+***Trial Predictions on Random Inputs***
+```{r}
+input <- Testchurn[c(8,9,17),]
+input
+pred_rand1 <- predict(Tree, input, type = 'class')
+print(pred_rand1)
+
+pred_rand2 <- predict(Forest, input, type = 'class')
+print(pred_rand2)
+
+pred_rand3 <- predict(LogReg, input, type = 'response')
+pred_rand3 <- ifelse(pred_rand3 > 0.45, 'Yes', 'No')
+print(pred_rand3)
+
+```
